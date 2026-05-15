@@ -87,8 +87,11 @@ st.set_page_config(page_title="수행평가 AI 채점기", page_icon="📝", lay
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap');
-*, body { font-family: 'Noto Sans KR', sans-serif !important; }
 
+/* Material Icon 폰트 깨짐(arrow_ 등) 방지를 위해 * 대신 특정 태그에만 폰트 적용 */
+html, body, p, div, span:not(.material-icons), h1, h2, h3, h4, h5, h6, li, a, button, input, textarea { 
+    font-family: 'Noto Sans KR', sans-serif; 
+}
 .hero {
     background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #db2777 100%);
     padding: 2.5rem 2rem; border-radius: 20px; margin-bottom: 2rem;
@@ -178,12 +181,12 @@ with st.sidebar:
 st.markdown("""
 <div class='hero'>
   <h1>📝 수행평가 AI 채점기</h1>
-  <p>스캔 답안 → Gemini Vision OCR → AI 자동 채점 → Google Sheets 출력</p>
+  <p>스캔 답안 → Gemini Vision OCR → AI 자동 채점 → 엑셀 파일 저장</p>
 </div>
 """, unsafe_allow_html=True)
 
 # ─── 탭 ─────────────────────────────────────────────────────────────────────────
-tabs = st.tabs(["① 수행평가 설정", "② 답안 업로드", "③ OCR 처리", "④ AI 채점", "⑤ Sheets 출력"])
+tabs = st.tabs(["① 수행평가 설정", "② 답안 업로드", "③ OCR 처리", "④ AI 채점", "⑤ 엑셀 파일 저장"])
 
 # ══════════════════════════════════════════════════════════
 # TAB 1 : 수행평가 설정
@@ -196,70 +199,66 @@ with tabs[0]:
     # ════════════════════════════════════════════════════
     # ① 설정 저장 · 불러오기
     # ════════════════════════════════════════════════════
-    st.markdown("#### 💾 수행평가 설정 저장 · 불러오기")
+    with st.expander("💾 저장된 수행평가 불러오기 / 저장하기", expanded=True):
+        presets = _list_presets()
+        preset_names = [p.stem for p in presets]
 
-    presets = _list_presets()
-    preset_names = [p.stem for p in presets]
+        col_sel, col_load, col_save, col_dl = st.columns([3, 1, 1, 1])
 
-    col_sel, col_load, col_save, col_dl = st.columns([3, 1, 1, 1])
+        with col_sel:
+            if preset_names:
+                chosen = st.selectbox(
+                    "저장된 설정 선택", options=[""] + preset_names,
+                    format_func=lambda x: "— 선택하세요 —" if x == "" else x,
+                    key="preset_select"
+                )
+            else:
+                st.caption("저장된 설정이 없습니다. 아래에서 입력 후 저장하세요.")
+                chosen = ""
 
-    with col_sel:
-        if preset_names:
-            chosen = st.selectbox(
-                "저장된 설정 선택", options=[""] + preset_names,
-                format_func=lambda x: "— 선택하세요 —" if x == "" else x,
-                key="preset_select"
+        with col_load:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("📂 불러오기", use_container_width=True,
+                         disabled=not chosen, key="btn_load_preset"):
+                try:
+                    data = _load_preset(PRESETS_DIR / f"{chosen}.json")
+                    _apply_preset(data)
+                    _save_preset(data, LAST_USED_FILE)   # 마지막 사용 갱신
+                    st.success(f"✅ '{chosen}' 불러왔습니다!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"불러오기 실패: {e}")
+
+        with col_save:
+            st.markdown("<br>", unsafe_allow_html=True)
+            exam_nm_now = st.session_state.get("exam_name", "").strip()
+            if st.button("💾 PC 저장", type="primary", use_container_width=True,
+                         disabled=not exam_nm_now, key="btn_save_preset",
+                         help="현재 설정을 앱 폴더(presets/)에 저장합니다."):
+                try:
+                    data = _current_settings()
+                    safe_name = "".join(c for c in exam_nm_now if c not in r'\/:*?"<>|')
+                    save_path = PRESETS_DIR / f"{safe_name}.json"
+                    _save_preset(data, save_path)
+                    _save_preset(data, LAST_USED_FILE)
+                    st.success(f"✅ '{safe_name}' 저장 완료!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"저장 실패: {e}")
+
+        with col_dl:
+            st.markdown("<br>", unsafe_allow_html=True)
+            data_dl = _current_settings()
+            fname_dl = f"{data_dl['exam_name'] or '수행평가'}_설정.json"
+            st.download_button(
+                "⬇️ 다운로드", key="btn_dl_preset",
+                data=json.dumps(data_dl, ensure_ascii=False, indent=2).encode("utf-8"),
+                file_name=fname_dl, mime="application/json",
+                use_container_width=True,
+                help="브라우저 Downloads 폴더에 JSON 파일로 내보냅니다."
             )
-        else:
-            st.caption("저장된 설정이 없습니다. 아래에서 입력 후 저장하세요.")
-            chosen = ""
 
-    with col_load:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("📂 불러오기", use_container_width=True,
-                     disabled=not chosen, key="btn_load_preset"):
-            try:
-                data = _load_preset(PRESETS_DIR / f"{chosen}.json")
-                _apply_preset(data)
-                _save_preset(data, LAST_USED_FILE)   # 마지막 사용 갱신
-                st.success(f"✅ '{chosen}' 불러왔습니다!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"불러오기 실패: {e}")
-
-    with col_save:
-        st.markdown("<br>", unsafe_allow_html=True)
-        exam_nm_now = st.session_state.get("exam_name", "").strip()
-        if st.button("💾 저장", type="primary", use_container_width=True,
-                     disabled=not exam_nm_now, key="btn_save_preset",
-                     help="현재 설정을 앱 폴더(presets/)에 저장합니다."):
-            try:
-                data = _current_settings()
-                # 파일명에 사용할 수 없는 문자 제거
-                safe_name = "".join(c for c in exam_nm_now if c not in r'\/:*?"<>|')
-                save_path = PRESETS_DIR / f"{safe_name}.json"
-                _save_preset(data, save_path)
-                _save_preset(data, LAST_USED_FILE)   # 마지막 사용 갱신
-                st.success(f"✅ '{safe_name}' 저장 완료! (presets/ 폴더)")
-                st.rerun()
-            except Exception as e:
-                st.error(f"저장 실패: {e}")
-
-    with col_dl:
-        st.markdown("<br>", unsafe_allow_html=True)
-        data_dl = _current_settings()
-        fname_dl = f"{data_dl['exam_name'] or '수행평가'}_설정.json"
-        st.download_button(
-            "⬇️ 내보내기", key="btn_dl_preset",
-            data=json.dumps(data_dl, ensure_ascii=False, indent=2).encode("utf-8"),
-            file_name=fname_dl, mime="application/json",
-            use_container_width=True,
-            help="Downloads 폴더에 JSON 파일로 내보냅니다."
-        )
-
-    # 삭제 버튼 (선택된 프리셋이 있을 때만)
-    if chosen and presets:
-        with st.expander("🗑️ 저장된 설정 삭제", expanded=False):
+        if chosen and presets:
             del_target = st.selectbox("삭제할 설정 선택", options=preset_names, key="preset_del_sel")
             if st.button(f"'{del_target}' 삭제", type="secondary", key="btn_del_preset"):
                 try:
@@ -269,17 +268,16 @@ with tabs[0]:
                 except Exception as e:
                     st.error(f"삭제 실패: {e}")
 
-    # 현재 로드된 설정 요약 배지
-    if st.session_state.get("exam_name"):
-        st.markdown(f"""
-        <div style='background:#ede9fe;border-radius:8px;padding:.55rem 1rem;
-                    font-size:.88rem;color:#4c1d95;margin-top:.2rem'>
-            📌 <b>{st.session_state.get('exam_name','')}</b>
-            &nbsp;·&nbsp; {st.session_state.get('subject','')}
-            &nbsp;·&nbsp; 루브릭 {len(st.session_state.get('rubric',[]))}개
-            &nbsp;<span style='opacity:.6;font-size:.8rem'>— 앱 재시작 시 자동 복원됩니다</span>
-        </div>
-        """, unsafe_allow_html=True)
+        if st.session_state.get("exam_name"):
+            st.markdown(f"""
+            <div style='background:#ede9fe;border-radius:8px;padding:.55rem 1rem;
+                        font-size:.88rem;color:#4c1d95;margin-top:.2rem'>
+                📌 <b>{st.session_state.get('exam_name','')}</b>
+                &nbsp;·&nbsp; {st.session_state.get('subject','')}
+                &nbsp;·&nbsp; 루브릭 {len(st.session_state.get('rubric',[]))}개
+                &nbsp;<span style='opacity:.6;font-size:.8rem'>— 앱 재시작 시 자동 복원됩니다</span>
+            </div>
+            """, unsafe_allow_html=True)
 
     st.markdown("---")
 
